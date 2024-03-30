@@ -24,18 +24,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.PopupProperties
 import androidx.navigation.NavBackStackEntry
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.*
 import me.rhunk.snapenhance.common.bridge.wrapper.TrackerLog
-import me.rhunk.snapenhance.common.data.TrackerEventType
-import me.rhunk.snapenhance.common.data.TrackerRule
-import me.rhunk.snapenhance.common.data.TrackerRuleAction
-import me.rhunk.snapenhance.common.data.TrackerRuleActionParams
-import me.rhunk.snapenhance.common.data.TrackerRuleEvent
+import me.rhunk.snapenhance.common.data.*
 import me.rhunk.snapenhance.ui.manager.Routes
+import me.rhunk.snapenhance.ui.manager.pages.social.AddFriendDialog
 import me.rhunk.snapenhance.ui.util.pagerTabIndicatorOffset
 import java.text.DateFormat
 
@@ -48,9 +41,10 @@ class FriendTrackerManagerRoot : Routes.Route() {
 
     private val titles = listOf("Logs", "Rules")
     private var currentPage by mutableIntStateOf(0)
+    private val showAddRulePopup = mutableStateOf(false)
 
     override val floatingActionButton: @Composable () -> Unit = {
-        var showAddRulePopup by remember { mutableStateOf(false) }
+        var showAddRulePopup by remember { showAddRulePopup }
         if (currentPage == 1) {
             ExtendedFloatingActionButton(
                 icon = { Icon(Icons.Default.Add, contentDescription = "Add Rule") },
@@ -248,10 +242,19 @@ class FriendTrackerManagerRoot : Routes.Route() {
     ) {
         var currentRuleId by remember { mutableStateOf(ruleId) }
         val events = remember { mutableStateListOf<TrackerRuleEvent>() }
+        val scopes = remember { mutableStateListOf<String>() }
+        var currentScopeType by remember { mutableStateOf(TrackerScopeType.BLACKLIST) }
 
         LaunchedEffect(Unit) {
-            currentRuleId = ruleId ?: context.modDatabase.addTrackerRule(null, null)
+            currentRuleId = ruleId ?: context.modDatabase.newTrackerRule()
             events.addAll(context.modDatabase.getTrackerEvents(currentRuleId ?: return@LaunchedEffect).toMutableList())
+            scopes.addAll(context.modDatabase.getRuleTrackerScopes(currentRuleId ?: return@LaunchedEffect).also {
+                currentScopeType = if (it.isEmpty()) {
+                    TrackerScopeType.WHITELIST
+                } else {
+                    it.values.first()
+                }
+            }.map { it.key })
         }
 
         fun saveRule() {
@@ -264,6 +267,7 @@ class FriendTrackerManagerRoot : Routes.Route() {
                     event.actions
                 )
             }
+            context.modDatabase.setRuleTrackerScopes(currentRuleId ?: return, currentScopeType, scopes)
         }
 
         @Composable
@@ -303,6 +307,68 @@ class FriendTrackerManagerRoot : Routes.Route() {
                         .fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly
+                    ){
+                        var addFriendDialog by remember { mutableStateOf(null as AddFriendDialog?) }
+
+                        val friendDialogActions = remember {
+                            AddFriendDialog.Actions(
+                                onFriendState = { friend, state ->
+                                    if (state) {
+                                        scopes.add(friend.userId)
+                                    } else {
+                                        scopes.remove(friend.userId)
+                                    }
+                                },
+                                onGroupState = { group, state ->
+                                    if (state) {
+                                        scopes.add(group.conversationId)
+                                    } else {
+                                        scopes.remove(group.conversationId)
+                                    }
+                                },
+                                getFriendState = { friend ->
+                                    friend.userId in scopes
+                                },
+                                getGroupState = { group ->
+                                    group.conversationId in scopes
+                                }
+                            )
+                        }
+
+                        Button(
+                            onClick = {
+                                currentScopeType = TrackerScopeType.BLACKLIST
+                                addFriendDialog = AddFriendDialog(
+                                    context,
+                                    friendDialogActions
+                                )
+                            },
+                            colors = if (currentScopeType == TrackerScopeType.BLACKLIST) ButtonDefaults.buttonColors() else ButtonDefaults.elevatedButtonColors()
+                        ) {
+                            Text("Blacklist" + if (currentScopeType == TrackerScopeType.BLACKLIST) " (" + scopes.size.toString() + ")" else "")
+                        }
+
+                        Button(
+                            onClick = {
+                                currentScopeType = TrackerScopeType.WHITELIST
+                                addFriendDialog = AddFriendDialog(
+                                    context,
+                                    friendDialogActions
+                                )
+                            },
+                            colors = if (currentScopeType == TrackerScopeType.WHITELIST) ButtonDefaults.buttonColors() else ButtonDefaults.elevatedButtonColors()
+                        ) {
+                            Text("Whitelist" + if (currentScopeType == TrackerScopeType.WHITELIST) " (" + scopes.size.toString() + ")" else "")
+                        }
+
+                        addFriendDialog?.Content {
+                            addFriendDialog = null
+                        }
+                    }
+
                     OutlinedCard(
                         modifier = Modifier
                             .fillMaxWidth(),
@@ -435,7 +501,14 @@ class FriendTrackerManagerRoot : Routes.Route() {
             LazyColumn(
                 modifier = Modifier.weight(1f)
             ) {
-                items(rules) { rule ->
+                item {
+                    if (rules.isEmpty()) {
+                        Text("No rules found", modifier = Modifier
+                            .padding(16.dp)
+                            .fillMaxWidth(), textAlign = TextAlign.Center, fontWeight = FontWeight.Light)
+                    }
+                }
+                items(rules, key = { it.id }) { rule ->
                     var eventCount by remember { mutableIntStateOf(0) }
 
                     LaunchedEffect(rule.id, editRuleId) {
@@ -456,7 +529,7 @@ class FriendTrackerManagerRoot : Routes.Route() {
                                 .padding(16.dp),
                             verticalArrangement = Arrangement.spacedBy(2.dp)
                         ) {
-                            Text("Rule ${rule.id} ${rule.conversationId?.let { "1 conversation" } ?: "All conversations" } - ${rule.userId?.let { "1 user" } ?: "All users"}")
+                            Text("Rule ${rule.id} ${rule.name}")
                             Text("has $eventCount events")
                         }
                     }
@@ -470,11 +543,11 @@ class FriendTrackerManagerRoot : Routes.Route() {
             })
         }
 
-        LaunchedEffect(editRuleId != null) {
+        LaunchedEffect(showAddRulePopup.value, editRuleId) {
             rules.clear()
-            launch(Dispatchers.IO) {
-                rules.addAll(context.modDatabase.getTrackerRules(null, null))
-            }
+            rules.addAll(withContext(Dispatchers.IO) {
+                context.modDatabase.getTrackerRules()
+            })
         }
     }
 

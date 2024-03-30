@@ -27,13 +27,18 @@ import me.rhunk.snapenhance.RemoteSideContext
 import me.rhunk.snapenhance.common.ReceiversConfig
 import me.rhunk.snapenhance.common.data.MessagingFriendInfo
 import me.rhunk.snapenhance.common.data.MessagingGroupInfo
-import me.rhunk.snapenhance.common.data.SocialScope
 import me.rhunk.snapenhance.common.util.snap.SnapWidgetBroadcastReceiverHelper
 
 class AddFriendDialog(
     private val context: RemoteSideContext,
-    private val socialRoot: SocialRoot,
+    private val actionHandler: Actions,
 ) {
+    class Actions(
+        val onFriendState: (friend: MessagingFriendInfo, state: Boolean) -> Unit,
+        val onGroupState: (group: MessagingGroupInfo, state: Boolean) -> Unit,
+        val getFriendState: (friend: MessagingFriendInfo) -> Boolean,
+        val getGroupState: (group: MessagingGroupInfo) -> Boolean,
+    )
 
     private val translation by lazy { context.translation.getCategory("manager.dialogs.add_friend")}
 
@@ -138,7 +143,7 @@ class AddFriendDialog(
             }
             timeoutJob = coroutineScope.launch {
                 withContext(Dispatchers.IO) {
-                    delay(10000)
+                    delay(20000)
                     hasFetchError = true
                 }
             }
@@ -217,14 +222,9 @@ class AddFriendDialog(
                         val group = filteredGroups[it]
                         ListCardEntry(
                             name = group.name,
-                            getCurrentState = { context.modDatabase.getGroupInfo(group.conversationId) != null }
+                            getCurrentState = { actionHandler.getGroupState(group) }
                         ) { state ->
-                            if (state) {
-                                context.bridgeService?.triggerScopeSync(SocialScope.GROUP, group.conversationId)
-                            } else {
-                                context.modDatabase.deleteGroup(group.conversationId)
-                            }
-                            socialRoot.updateScopeLists()
+                            actionHandler.onGroupState(group, state)
                         }
                     }
 
@@ -242,14 +242,9 @@ class AddFriendDialog(
 
                         ListCardEntry(
                             name = friend.displayName?.takeIf { name -> name.isNotBlank() } ?: friend.mutableUsername,
-                            getCurrentState = { context.modDatabase.getFriendInfo(friend.userId) != null }
+                            getCurrentState = { actionHandler.getFriendState(friend) }
                         ) { state ->
-                            if (state) {
-                                context.bridgeService?.triggerScopeSync(SocialScope.FRIEND, friend.userId)
-                            } else {
-                                context.modDatabase.deleteFriend(friend.userId)
-                            }
-                            socialRoot.updateScopeLists()
+                            actionHandler.onFriendState(friend, state)
                         }
                     }
                 }

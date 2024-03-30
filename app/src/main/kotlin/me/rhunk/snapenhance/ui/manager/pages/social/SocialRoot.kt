@@ -46,7 +46,26 @@ class SocialRoot : Routes.Route() {
     }
 
     private val addFriendDialog by lazy {
-        AddFriendDialog(context, this)
+        AddFriendDialog(context, AddFriendDialog.Actions(
+            onFriendState = { friend, state ->
+                if (state) {
+                    context.bridgeService?.triggerScopeSync(SocialScope.FRIEND, friend.userId)
+                } else {
+                    context.modDatabase.deleteFriend(friend.userId)
+                }
+                updateScopeLists()
+            },
+            onGroupState = { group, state ->
+                if (state) {
+                    context.bridgeService?.triggerScopeSync(SocialScope.GROUP, group.conversationId)
+                } else {
+                    context.modDatabase.deleteGroup(group.conversationId)
+                }
+                updateScopeLists()
+            },
+            getFriendState = { friend -> context.modDatabase.getFriendInfo(friend.userId) != null },
+            getGroupState = { group -> context.modDatabase.getGroupInfo(group.conversationId) != null }
+        ))
     }
 
     @Composable

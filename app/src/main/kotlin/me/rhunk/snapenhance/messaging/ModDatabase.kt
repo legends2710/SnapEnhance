@@ -72,8 +72,13 @@ class ModDatabase(
             ),
             "tracker_rules" to listOf(
                 "id INTEGER PRIMARY KEY AUTOINCREMENT",
-                "conversation_id CHAR(36)", // nullable
-                "user_id CHAR(36)", // nullable
+                "name VARCHAR",
+            ),
+            "tracker_scopes" to listOf(
+                "id INTEGER PRIMARY KEY AUTOINCREMENT",
+                "rule_id INTEGER",
+                "scope_type VARCHAR",
+                "scope_id CHAR(36)"
             ),
             "tracker_rules_events" to listOf(
                 "id INTEGER PRIMARY KEY AUTOINCREMENT",
@@ -338,13 +343,12 @@ class ModDatabase(
         }
     }
 
-    fun addTrackerRule(conversationId: String?, userId: String?): Int {
+    fun newTrackerRule(name: String = "Custom Rule"): Int {
         return runBlocking {
             suspendCoroutine { continuation ->
                 executeAsync {
                     val id = database.insert("tracker_rules", null, ContentValues().apply {
-                        put("conversation_id", conversationId)
-                        put("user_id", userId)
+                        put("name", name)
                     })
                     continuation.resumeWith(Result.success(id.toInt()))
                 }
@@ -389,16 +393,15 @@ class ModDatabase(
         }
     }
 
-     fun getTrackerRules(conversationId: String?, userId: String?): List<TrackerRule> {
+     fun getTrackerRules(): List<TrackerRule> {
         val rules = mutableListOf<TrackerRule>()
 
-        database.rawQuery("SELECT * FROM tracker_rules WHERE (conversation_id = ? OR conversation_id IS NULL) AND (user_id = ? OR user_id IS NULL)", arrayOf(conversationId, userId).filterNotNull().toTypedArray()).use { cursor ->
+        database.rawQuery("SELECT * FROM tracker_rules", null).use { cursor ->
             while (cursor.moveToNext()) {
                 rules.add(
                     TrackerRule(
                         id = cursor.getInteger("id"),
-                        conversationId = cursor.getStringOrNull("conversation_id"),
-                        userId = cursor.getStringOrNull("user_id"),
+                        name = cursor.getStringOrNull("name") ?: "",
                     )
                 )
             }
@@ -430,7 +433,7 @@ class ModDatabase(
     fun getTrackerEvents(eventType: String): Map<TrackerRuleEvent, TrackerRule> {
         val events = mutableMapOf<TrackerRuleEvent, TrackerRule>()
         database.rawQuery("SELECT tracker_rules_events.id as event_id, tracker_rules_events.params as event_params," +
-                "tracker_rules_events.actions, tracker_rules_events.flags, tracker_rules_events.event_type, tracker_rules.conversation_id, tracker_rules.user_id " +
+                "tracker_rules_events.actions, tracker_rules_events.flags, tracker_rules_events.event_type, tracker_rules.name, tracker_rules.id as rule_id " +
                 "FROM tracker_rules_events " +
                 "INNER JOIN tracker_rules " +
                 "ON tracker_rules_events.rule_id = tracker_rules.id " +
@@ -438,9 +441,8 @@ class ModDatabase(
         ).use { cursor ->
             while (cursor.moveToNext()) {
                 val trackerRule = TrackerRule(
-                    id = -1,
-                    conversationId = cursor.getStringOrNull("conversation_id"),
-                    userId = cursor.getStringOrNull("user_id"),
+                    id = cursor.getInteger("rule_id"),
+                    name = cursor.getStringOrNull("name") ?: "",
                 )
                 val trackerRuleEvent = TrackerRuleEvent(
                     id = cursor.getInteger("event_id"),
@@ -455,5 +457,28 @@ class ModDatabase(
             }
         }
         return events
+    }
+
+    fun setRuleTrackerScopes(ruleId: Int, type: TrackerScopeType, scopes: List<String>) {
+        executeAsync {
+            database.execSQL("DELETE FROM tracker_scopes WHERE rule_id = ?", arrayOf(ruleId))
+            scopes.forEach { scopeId ->
+                database.execSQL("INSERT INTO tracker_scopes (rule_id, scope_type, scope_id) VALUES (?, ?, ?)", arrayOf(
+                    ruleId,
+                    type.key,
+                    scopeId
+                ))
+            }
+        }
+    }
+
+    fun getRuleTrackerScopes(ruleId: Int): Map<String, TrackerScopeType> {
+        val scopes = mutableMapOf<String, TrackerScopeType>()
+        database.rawQuery("SELECT * FROM tracker_scopes WHERE rule_id = ?", arrayOf(ruleId.toString())).use { cursor ->
+            while (cursor.moveToNext()) {
+                scopes[cursor.getStringOrNull("scope_id") ?: continue] = TrackerScopeType.entries.find { it.key == cursor.getStringOrNull("scope_type") } ?: continue
+            }
+        }
+        return scopes
     }
 }

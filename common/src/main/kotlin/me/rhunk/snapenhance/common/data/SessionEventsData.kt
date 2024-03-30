@@ -76,7 +76,7 @@ enum class TrackerEventType(
 
 @Parcelize
 class TrackerEventsResult(
-    val rules: Map<TrackerRule, List<TrackerRuleEvent>>
+    val rules: Map<ScopedTrackerRule, List<TrackerRuleEvent>>,
 ): Parcelable {
     fun getActions(): Map<TrackerRuleAction, TrackerRuleActionParams> {
         return rules.flatMap {
@@ -90,30 +90,23 @@ class TrackerEventsResult(
     }
 
     fun canTrackOn(conversationId: String?, userId: String?): Boolean {
-        return rules.any t@{ (rule, ruleEvents) ->
-            ruleEvents.any { event ->
-                if (!event.enabled) {
-                    return@any false
-                }
+        return rules.any { (scopedRule, events) ->
+            if (!events.any { it.enabled }) return@any false
+            val scopes = scopedRule.scopes
 
-                // global rule
-                if (rule.conversationId == null && rule.userId == null) {
-                    return@any true
-                }
-
-                // user rule
-                if (rule.conversationId == null && rule.userId == userId) {
-                    return@any true
-                }
-
-                // conversation rule
-                if (rule.conversationId == conversationId && rule.userId == null) {
-                    return@any true
-                }
-
-                // conversation and user rule
-                return@any rule.conversationId == conversationId && rule.userId == userId
+            when (scopes[userId]) {
+                TrackerScopeType.WHITELIST -> return@any true
+                TrackerScopeType.BLACKLIST -> return@any false
+                else -> {}
             }
+
+            when (scopes[conversationId]) {
+                TrackerScopeType.WHITELIST -> return@any true
+                TrackerScopeType.BLACKLIST -> return@any false
+                else -> {}
+            }
+
+            return@any scopes.isEmpty() || scopes.any { it.value == TrackerScopeType.BLACKLIST }
         }
     }
 }
@@ -155,9 +148,21 @@ data class TrackerRuleActionParams(
 @Parcelize
 data class TrackerRule(
     val id: Int,
-    val conversationId: String?,
-    val userId: String?,
+    val name: String,
 ): Parcelable
+
+@Parcelize
+data class ScopedTrackerRule(
+    val rule: TrackerRule,
+    val scopes: Map<String, TrackerScopeType>
+): Parcelable
+
+enum class TrackerScopeType(
+    val key: String
+) {
+    WHITELIST("whitelist"),
+    BLACKLIST("blacklist");
+}
 
 @Parcelize
 data class TrackerRuleEvent(
