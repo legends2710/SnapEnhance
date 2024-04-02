@@ -11,13 +11,15 @@ import me.rhunk.snapenhance.core.event.events.impl.AddViewEvent
 import me.rhunk.snapenhance.core.features.Feature
 import me.rhunk.snapenhance.core.features.FeatureLoadParams
 import me.rhunk.snapenhance.core.features.impl.messaging.Messaging
+import me.rhunk.snapenhance.core.ui.findParent
 import me.rhunk.snapenhance.core.ui.menu.impl.*
 import me.rhunk.snapenhance.core.util.ktx.getIdentifier
+import kotlin.reflect.KClass
 
 @SuppressLint("DiscouragedApi")
 class MenuViewInjector : Feature("MenuViewInjector", loadParams = FeatureLoadParams.ACTIVITY_CREATE_ASYNC) {
-    override fun asyncOnActivityCreate() {
-        val menuMap = arrayOf(
+    private val menuMap by lazy {
+        arrayOf(
             NewChatActionMenu(),
             OperaContextActionMenu(),
             OperaDownloadIconMenu(),
@@ -27,15 +29,24 @@ class MenuViewInjector : Feature("MenuViewInjector", loadParams = FeatureLoadPar
             SettingsMenu()
         ).associateBy {
             it.context = context
-            it.init()
+            it.menuViewInjector = this
             it::class
         }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    fun <T: AbstractMenu> menu(menuClass: KClass<T>): T? {
+        return menuMap[menuClass] as? T
+    }
+
+    override fun asyncOnActivityCreate() {
+        menuMap.forEach { it.value.init() }
 
         val messaging = context.feature(Messaging::class)
 
         val actionSheetItemsContainerLayoutId = context.resources.getIdentifier("action_sheet_items_container", "id")
         val actionSheetContainer = context.resources.getIdentifier("action_sheet_container", "id")
-        val actionMenuHeaderId = context.resources.getIdentifier("action_menu_header", "id")
+        val actionMenuTitle = context.resources.getIdentifier("action_menu_title", "id")
         val actionMenu = context.resources.getIdentifier("action_menu", "id")
         val componentsHolder = context.resources.getIdentifier("components_holder", "id")
         val feedNewChat = context.resources.getIdentifier("feed_new_chat", "id")
@@ -56,14 +67,17 @@ class MenuViewInjector : Feature("MenuViewInjector", loadParams = FeatureLoadPar
             val childView: View = event.view
             menuMap[OperaContextActionMenu::class]!!.inject(viewGroup, childView, originalAddView)
 
-            if (event.view.id == actionMenuHeaderId) {
-                event.parent.post {
-                    val actionSheetItemsContainer = event.parent.findViewById<ViewGroup>(actionSheetItemsContainerLayoutId) ?: return@post
+            if (event.view.id == actionSheetItemsContainerLayoutId) {
+                event.view.post {
+                    if (event.parent.findParent(4) {
+                        it.findViewById<View>(actionMenuTitle) != null
+                    } == null) return@post
+
                     val views = mutableListOf<View>()
-                    menuMap[FriendFeedInfoMenu::class]?.inject(event.parent, actionSheetItemsContainer) {
+                    menuMap[FriendFeedInfoMenu::class]?.inject(event.parent, event.view) {
                         views.add(it)
                     }
-                    views.reversed().forEach { actionSheetItemsContainer.addView(it, 0) }
+                    views.reversed().forEach { (event.view as ViewGroup).addView(it, 0) }
                 }
             }
 

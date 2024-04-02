@@ -675,10 +675,6 @@
                             "disable_bitmoji": {
                                 "name": "Disable Bitmoji",
                                 "description": "Disables Friends Profile Bitmoji"
-                            },
-                            "remap_apk": {
-                                "name": "Remap APK",
-                                "description": "Hides SnapEnhance apk path in /proc/self/maps"
                             }
                         }
                     },
@@ -1059,7 +1055,8 @@
         "preview_button": "Preview",
         "download_button": "Download",
         "delete_logged_message_button": "Delete Logged Message",
-        "convert_message": "Convert Message"
+        "convert_message": "Convert Message",
+        "edit_message": "Edit Message"
     },
 
     "opera_context_menu": {
